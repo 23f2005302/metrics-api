@@ -1,17 +1,18 @@
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel
 import time
 import uuid
+import jwt
 
-# 1. Initialize the FastAPI application
 app = FastAPI()
 
-# 2. Configure the CORS Policy
-# This ensures ONLY the specific website provided by your assignment can access your API.
-# It automatically handles the "Preflight OPTIONS" checks the grader is looking for.
-origins = [
-    "https://dash-qju8pt.example.com"
-]
+# ==========================================
+# QUESTION 1: THE STATS & CORS ENDPOINT
+# ==========================================
+
+origins = ["https://dash-qju8pt.example.com"]
 
 app.add_middleware(
     CORSMiddleware,
@@ -21,51 +22,75 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# 3. Custom Middleware for Required Headers
-# Middleware is a function that runs before and after every single request.
 @app.middleware("http")
 async def add_custom_headers(request: Request, call_next):
-    # Start a timer
     start_time = time.time()
-    
-    # Generate a unique identifier for the request
     request_id = str(uuid.uuid4())
-
-    # Pass the request down the line to be processed
     response = await call_next(request)
-
-    # Stop the timer and calculate how long it took (in seconds)
     process_time = time.time() - start_time
-    
-    # Attach the required custom headers to the response
     response.headers["X-Request-ID"] = request_id
     response.headers["X-Process-Time"] = str(process_time)
-
     return response
 
-# 4. The Stats Endpoint
 @app.get("/stats")
 def get_stats(values: str):
-    # The 'values' parameter comes in as a string like "1,2,3"
-    # We split it by the comma and convert each piece into an integer
     try:
         int_values = [int(v) for v in values.split(",")]
     except ValueError:
-        return {"error": "Invalid input. Please provide comma-separated integers."}
+        return {"error": "Invalid input."}
 
-    # Perform the required mathematical calculations
     count = len(int_values)
     total_sum = sum(int_values)
     minimum = min(int_values)
     maximum = max(int_values)
     mean = total_sum / count
 
-    # Return the exact JSON structure requested by the grader
     return {
-        "email": "23f2005302@ds.study.iitm.ac.in", # REPLACE THIS WITH YOUR LOGGED-IN EMAIL
+        "email": "23f2005302@ds.study.iitm.ac.in",
         "count": count,
         "sum": total_sum,
         "min": minimum,
         "max": maximum,
         "mean": mean
     }
+
+# ==========================================
+# QUESTION 2: THE JWT VERIFY ENDPOINT
+# ==========================================
+
+ISSUER = "https://idp.exam.local"
+AUDIENCE = "tds-0vwph3az.apps.exam.local"
+PUBLIC_KEY = """-----BEGIN PUBLIC KEY-----
+MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA2okOHspNjgA+2rTLbeuY
+cxiP/hG8C6Sb9iwg3yiLAA4HCnpITcbWCSelbvbyGuc3EbNy4xFyf5Cbj5DHJMID
+EkryOgyd2giIIIBOUBj8S63uGcnRpOBh9NFatfNwheKuzsPuVNldu6A9cNteNpXc
+WyjJG2axVfmq7i6SuKr1JoWYG7xTTAvKPujS140tsQfO3h5NepzdfXpr28oNnzfW
+ed+zc1R6BcmNNo/WVfJ4xyCLSf0BCOgdTgW6PdaChd119VDetJZVEgC5tkyvXsfI
+SI6iyrYbkR0NEBSqq4XkadEjsCs4F1RncsS4L1gniT7GlkL9Mce3b0wGLs9/7ZIX
+dQIDAQAB
+-----END PUBLIC KEY-----"""
+
+class TokenRequest(BaseModel):
+    token: str
+
+@app.post("/verify")
+def verify_token(request: TokenRequest):
+    try:
+        decoded_payload = jwt.decode(
+            request.token,
+            PUBLIC_KEY,
+            algorithms=["RS256"],
+            issuer=ISSUER,
+            audience=AUDIENCE
+        )
+        return {
+            "valid": True,
+            "email": decoded_payload.get("email"),
+            "sub": decoded_payload.get("sub"),
+            "aud": decoded_payload.get("aud")
+        }
+    except jwt.InvalidTokenError:
+        return JSONResponse(
+            status_code=401,
+            content={"valid": False}
+        )
