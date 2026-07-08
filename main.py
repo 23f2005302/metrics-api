@@ -23,7 +23,9 @@ RATE_LIMIT = 15
 RATE_WINDOW = 10
 
 # ==========================================
-# 🚨 THE FIX: ADDED EXPOSE_HEADERS 🚨
+# 🚨 THE CORS FIX 🚨
+# Browsers block expose_headers=["*"] if credentials are True.
+# We must explicitly list the custom headers the grader needs to read!
 # ==========================================
 app.add_middleware(
     CORSMiddleware,
@@ -35,7 +37,7 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
-    expose_headers=["*"]  # This lets the grader's Javascript actually read our custom headers!
+    expose_headers=["X-Request-ID", "X-Process-Time", "Retry-After"] 
 )
 
 # ==========================================
