@@ -11,91 +11,87 @@ import jwt
 app = FastAPI()
 
 # ==========================================
-# GLOBAL TRACKING (For Q6 & Q10)
+# GLOBAL TRACKING 
 # ==========================================
 APP_START_TIME = time.time()
 REQUEST_COUNT = 0
 LOGS = []
 
-# Rate limiter bucket for Q10
+# Rate limiter bucket (15 requests per 10 seconds)
 RATE_LIMIT_DATA = defaultdict(list)
 RATE_LIMIT = 15
 RATE_WINDOW = 10
 
 # ==========================================
-# 🚨 THE CORS FIX 🚨
-# Browsers block expose_headers=["*"] if credentials are True.
-# We must explicitly list the custom headers the grader needs to read!
+# 🚨 THE MAGIC CORS FIX 🚨
+# allow_credentials=False lets the browser safely accept the wildcard headers.
+# expose_headers explicitly tells the browser to show X-Request-ID to the grader!
 # ==========================================
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
-        "https://dash-qju8pt.example.com",     # Q1 Grader
-        "https://exam.sanand.workers.dev",     # Your Browser (Q3, Q10)
-        "https://app-lkptr8.example.com"       # Q10 Assigned Origin
+        "https://app-lkptr8.example.com",      # Q10 Assigned Origin
+        "https://exam.sanand.workers.dev",     # Your Browser
+        "https://dash-qju8pt.example.com"      # Q1 Grader Origin
     ],
-    allow_credentials=True,
+    allow_credentials=False, 
     allow_methods=["*"],
-    allow_headers=["*"],
+    allow_headers=["*"], 
     expose_headers=["X-Request-ID", "X-Process-Time", "Retry-After"] 
 )
 
 # ==========================================
-# GLOBAL MIDDLEWARE (Q1, Q6, & Q10)
+# MASTER MIDDLEWARE (Handles Q1, Q6, & Q10)
 # ==========================================
 @app.middleware("http")
 async def global_middleware(request: Request, call_next):
     global REQUEST_COUNT, LOGS, RATE_LIMIT_DATA
     
-    # --- Q10: PER-CLIENT RATE LIMITING ---
+    # 1. GENERATE OR REUSE REQUEST ID
+    req_id = request.headers.get("X-Request-ID", str(uuid.uuid4()))
+    request.state.req_id = req_id
+
+    # 2. PER-CLIENT RATE LIMITING
     client_id = request.headers.get("X-Client-Id")
     if client_id:
         now = time.time()
-        # Clean up timestamps older than 10 seconds
+        # Clean out old requests
         RATE_LIMIT_DATA[client_id] = [ts for ts in RATE_LIMIT_DATA[client_id] if now - ts < RATE_WINDOW]
         
-        # Check if they exceeded the assigned 15 requests
+        # Block if they hit 15 requests
         if len(RATE_LIMIT_DATA[client_id]) >= RATE_LIMIT:
             return JSONResponse(
                 status_code=429, 
                 content={"error": "Too Many Requests"}, 
                 headers={
                     "Retry-After": str(RATE_WINDOW),
-                    "X-Request-ID": request.headers.get("X-Request-ID", str(uuid.uuid4()))
+                    "X-Request-ID": req_id
                 }
             )
         RATE_LIMIT_DATA[client_id].append(now)
 
-    # --- Q6: PROMETHEUS COUNTER ---
+    # 3. METRICS AND LOGGING
     REQUEST_COUNT += 1
-    
     start_time = time.time()
     
-    # --- Q10 & Q1: REQUEST CONTEXT ID ---
-    # If the user sends an ID, reuse it. Otherwise, make a new one.
-    request_id = request.headers.get("X-Request-ID")
-    if not request_id:
-        request_id = str(uuid.uuid4())
-        
-    # Save the ID so endpoints (like /ping) can read it
-    request.state.req_id = request_id
-    
-    # --- Q6: STRUCTURED LOGS ---
     LOGS.append({
         "level": "INFO",
         "ts": time.time(),
         "path": request.url.path,
-        "request_id": request_id
+        "request_id": req_id
     })
-    if len(LOGS) > 100:
+    if len(LOGS) > 100: 
         LOGS.pop(0)
 
-    # PROCESS THE ACTUAL REQUEST
-    response = await call_next(request)
+    # 4. CRASH PROTECTOR (Ensures CORS headers are never lost)
+    try:
+        response = await call_next(request)
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": "Server error", "detail": str(e)})
     
-    # --- Q10 & Q1: RESPONSE HEADERS ---
+    # 5. ATTACH HEADERS TO RESPONSE
     process_time = time.time() - start_time
-    response.headers["X-Request-ID"] = request_id
+    response.headers["X-Request-ID"] = req_id
     response.headers["X-Process-Time"] = str(process_time)
     
     return response
@@ -203,7 +199,6 @@ def get_effective_config(request: Request):
         config["api_key"] = "****"
         
         return config
-        
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": str(e)})
 
@@ -219,10 +214,7 @@ class AnalyticsPayload(BaseModel):
     events: List[Event]
 
 @app.post("/analytics")
-def analyze_events(
-    payload: AnalyticsPayload, 
-    x_api_key: str = Header(None) 
-):
+def analyze_events(payload: AnalyticsPayload, x_api_key: str = Header(None)):
     if x_api_key != "ak_h5y8gsndyxzwpx4r2h2t6bma":
         return JSONResponse(status_code=401, content={"error": "Invalid API Key"})
 
