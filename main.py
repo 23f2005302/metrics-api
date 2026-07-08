@@ -1,6 +1,8 @@
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Header
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel
+from typing import List
 import time
 import uuid
 import jwt
@@ -8,8 +10,7 @@ import jwt
 app = FastAPI()
 
 # ==========================================
-# 🚨 THE FINAL CORS FIX 🚨
-# We now allow the Q1 mock grader AND your actual browser URL!
+# UNIVERSAL CORS POLICY (Protects Q1, Q3, and Q5)
 # ==========================================
 app.add_middleware(
     CORSMiddleware,
@@ -128,3 +129,46 @@ def get_effective_config(request: Request):
         
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": str(e)})
+
+# ==========================================
+# QUESTION 5: POST ANALYTICS ENDPOINT
+# ==========================================
+class Event(BaseModel):
+    user: str
+    amount: float
+    ts: int
+
+class AnalyticsPayload(BaseModel):
+    events: List[Event]
+
+@app.post("/analytics")
+def analyze_events(
+    payload: AnalyticsPayload, 
+    x_api_key: str = Header(None) 
+):
+    if x_api_key != "ak_h5y8gsndyxzwpx4r2h2t6bma":
+        return JSONResponse(status_code=401, content={"error": "Invalid API Key"})
+
+    events = payload.events
+    total_events = len(events)
+    unique_users = set()
+    user_revenue = {}
+    total_revenue = 0.0
+    
+    for event in events:
+        unique_users.add(event.user)
+        if event.amount > 0:
+            total_revenue += event.amount
+            user_revenue[event.user] = user_revenue.get(event.user, 0.0) + event.amount
+
+    top_user = ""
+    if user_revenue:
+        top_user = max(user_revenue, key=user_revenue.get)
+
+    return {
+        "email": "23f2005302@ds.study.iitm.ac.in",
+        "total_events": total_events,
+        "unique_users": len(unique_users),
+        "revenue": total_revenue,
+        "top_user": top_user
+    }
