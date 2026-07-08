@@ -1,6 +1,6 @@
-from fastapi import FastAPI, Request, Header
+from fastapi import FastAPI, Request, Header, Query
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, PlainTextResponse
 from pydantic import BaseModel
 from typing import List
 import time
@@ -10,7 +10,14 @@ import jwt
 app = FastAPI()
 
 # ==========================================
-# UNIVERSAL CORS POLICY (Protects Q1, Q3, and Q5)
+# GLOBAL TRACKING FOR Q6
+# ==========================================
+APP_START_TIME = time.time()
+REQUEST_COUNT = 0
+LOGS = []
+
+# ==========================================
+# UNIVERSAL CORS POLICY
 # ==========================================
 app.add_middleware(
     CORSMiddleware,
@@ -24,18 +31,43 @@ app.add_middleware(
 )
 
 # ==========================================
-# QUESTION 1: THE STATS & HEADERS ENDPOINT
+# Q1 & Q6: GLOBAL MIDDLEWARE (Headers + Logging)
 # ==========================================
 @app.middleware("http")
-async def add_custom_headers(request: Request, call_next):
+async def global_middleware(request: Request, call_next):
+    global REQUEST_COUNT, LOGS
+    
+    # Q6: Increment Prometheus Counter for EVERY request
+    REQUEST_COUNT += 1
+    
     start_time = time.time()
     request_id = str(uuid.uuid4())
+    
+    # Q6: Record the structured JSON log
+    LOGS.append({
+        "level": "INFO",
+        "ts": time.time(),
+        "path": request.url.path,
+        "request_id": request_id
+    })
+    
+    # Keep logs from growing infinitely and crashing the free server
+    if len(LOGS) > 100:
+        LOGS.pop(0)
+
+    # Process the request
     response = await call_next(request)
+    
+    # Q1: Add the required headers
     process_time = time.time() - start_time
     response.headers["X-Request-ID"] = request_id
     response.headers["X-Process-Time"] = str(process_time)
+    
     return response
 
+# ==========================================
+# QUESTION 1: THE STATS ENDPOINT
+# ==========================================
 @app.get("/stats")
 def get_stats(values: str):
     try:
@@ -172,3 +204,27 @@ def analyze_events(
         "revenue": total_revenue,
         "top_user": top_user
     }
+
+# ==========================================
+# QUESTION 6: OBSERVABILITY ENDPOINTS
+# ==========================================
+@app.get("/work")
+def do_work(n: int = Query(default=1)):
+    # Simulates doing 'n' units of work
+    return {"email": "23f2005302@ds.study.iitm.ac.in", "done": n}
+
+@app.get("/metrics", response_class=PlainTextResponse)
+def get_metrics():
+    # Returns the prometheus counter
+    return f"http_requests_total {REQUEST_COUNT}\n"
+
+@app.get("/healthz")
+def get_health():
+    # Returns server uptime
+    uptime = time.time() - APP_START_TIME
+    return {"status": "ok", "uptime_s": uptime}
+
+@app.get("/logs/tail")
+def get_logs(limit: int = Query(default=10)):
+    # Returns the last N logs. LOGS[-limit:] slices the array from the end.
+    return LOGS[-limit:]
