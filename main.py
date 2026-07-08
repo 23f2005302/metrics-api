@@ -8,10 +8,12 @@ import jwt
 
 app = FastAPI()
 
-# Enable Global CORS for all grader questions
+# FIX: Locked down CORS to ONLY allow the specific grader dashboard!
+origins = ["https://dash-qju8pt.example.com"]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], 
+    allow_origins=origins, 
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
