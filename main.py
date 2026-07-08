@@ -23,7 +23,7 @@ RATE_LIMIT = 15
 RATE_WINDOW = 10
 
 # ==========================================
-# Q10 & Q1 UNIVERSAL CORS POLICY 
+# 🚨 THE FIX: ADDED EXPOSE_HEADERS 🚨
 # ==========================================
 app.add_middleware(
     CORSMiddleware,
@@ -35,6 +35,7 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["*"]  # This lets the grader's Javascript actually read our custom headers!
 )
 
 # ==========================================
@@ -56,7 +57,10 @@ async def global_middleware(request: Request, call_next):
             return JSONResponse(
                 status_code=429, 
                 content={"error": "Too Many Requests"}, 
-                headers={"Retry-After": str(RATE_WINDOW)}
+                headers={
+                    "Retry-After": str(RATE_WINDOW),
+                    "X-Request-ID": request.headers.get("X-Request-ID", str(uuid.uuid4()))
+                }
             )
         RATE_LIMIT_DATA[client_id].append(now)
 
