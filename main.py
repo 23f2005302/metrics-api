@@ -18,7 +18,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
     allow_credentials=True,
-    allow_methods=["*"], # FIX: Changed to "*" to allow the POST request for Q2
+    allow_methods=["*"], 
     allow_headers=["*"],
 )
 
@@ -60,15 +60,19 @@ def get_stats(values: str):
 
 ISSUER = "https://idp.exam.local"
 AUDIENCE = "tds-0vwph3az.apps.exam.local"
-PUBLIC_KEY = """-----BEGIN PUBLIC KEY-----
-MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA2okOHspNjgA+2rTLbeuY
-cxiP/hG8C6Sb9iwg3yiLAA4HCnpITcbWCSelbvbyGuc3EbNy4xFyf5Cbj5DHJMID
-EkryOgyd2giIIIBOUBj8S63uGcnRpOBh9NFatfNwheKuzsPuVNldu6A9cNteNpXc
-WyjJG2axVfmq7i6SuKr1JoWYG7xTTAvKPujS140tsQfO3h5NepzdfXpr28oNnzfW
-ed+zc1R6BcmNNo/WVfJ4xyCLSf0BCOgdTgW6PdaChd119VDetJZVEgC5tkyvXsfI
-SI6iyrYbkR0NEBSqq4XkadEjsCs4F1RncsS4L1gniT7GlkL9Mce3b0wGLs9/7ZIX
-dQIDAQAB
------END PUBLIC KEY-----"""
+
+# FIX: Bulletproof formatting to prevent hidden space errors in GitHub
+PUBLIC_KEY = (
+    "-----BEGIN PUBLIC KEY-----\n"
+    "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA2okOHspNjgA+2rTLbeuY\n"
+    "cxiP/hG8C6Sb9iwg3yiLAA4HCnpITcbWCSelbvbyGuc3EbNy4xFyf5Cbj5DHJMID\n"
+    "EkryOgyd2giIIIBOUBj8S63uGcnRpOBh9NFatfNwheKuzsPuVNldu6A9cNteNpXc\n"
+    "WyjJG2axVfmq7i6SuKr1JoWYG7xTTAvKPujS140tsQfO3h5NepzdfXpr28oNnzfW\n"
+    "ed+zc1R6BcmNNo/WVfJ4xyCLSf0BCOgdTgW6PdaChd119VDetJZVEgC5tkyvXsfI\n"
+    "SI6iyrYbkR0NEBSqq4XkadEjsCs4F1RncsS4L1gniT7GlkL9Mce3b0wGLs9/7ZIX\n"
+    "dQIDAQAB\n"
+    "-----END PUBLIC KEY-----"
+)
 
 class TokenRequest(BaseModel):
     token: str
@@ -82,7 +86,7 @@ def verify_token(request: TokenRequest):
             algorithms=["RS256"],
             issuer=ISSUER,
             audience=AUDIENCE,
-            leeway=60 # FIX: This allows for a 60-second clock difference between servers!
+            leeway=60 
         )
         return {
             "valid": True,
@@ -91,7 +95,6 @@ def verify_token(request: TokenRequest):
             "aud": decoded_payload.get("aud")
         }
     except Exception as e:
-        # FIX: If it fails again, this will echo the exact error back to the grader
         return JSONResponse(
             status_code=401,
             content={"valid": False, "error": str(e)}
