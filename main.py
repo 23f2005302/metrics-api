@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, PlainTextResponse
 from pydantic import BaseModel
 from typing import List
+from collections import defaultdict
 import time
 import uuid
 import jwt
@@ -10,20 +11,26 @@ import jwt
 app = FastAPI()
 
 # ==========================================
-# GLOBAL TRACKING FOR Q6
+# GLOBAL TRACKING (For Q6 & Q10)
 # ==========================================
 APP_START_TIME = time.time()
 REQUEST_COUNT = 0
 LOGS = []
 
+# Rate limiter bucket for Q10
+RATE_LIMIT_DATA = defaultdict(list)
+RATE_LIMIT = 15
+RATE_WINDOW = 10
+
 # ==========================================
-# UNIVERSAL CORS POLICY
+# Q10 & Q1 UNIVERSAL CORS POLICY 
 # ==========================================
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
-        "https://dash-qju8pt.example.com",
-        "https://exam.sanand.workers.dev"
+        "https://dash-qju8pt.example.com",     # Q1 Grader
+        "https://exam.sanand.workers.dev",     # Your Browser (Q3, Q10)
+        "https://app-lkptr8.example.com"       # Q10 Assigned Origin
     ],
     allow_credentials=True,
     allow_methods=["*"],
@@ -31,39 +38,71 @@ app.add_middleware(
 )
 
 # ==========================================
-# Q1 & Q6: GLOBAL MIDDLEWARE (Headers + Logging)
+# GLOBAL MIDDLEWARE (Q1, Q6, & Q10)
 # ==========================================
 @app.middleware("http")
 async def global_middleware(request: Request, call_next):
-    global REQUEST_COUNT, LOGS
+    global REQUEST_COUNT, LOGS, RATE_LIMIT_DATA
     
-    # Q6: Increment Prometheus Counter for EVERY request
+    # --- Q10: PER-CLIENT RATE LIMITING ---
+    client_id = request.headers.get("X-Client-Id")
+    if client_id:
+        now = time.time()
+        # Clean up timestamps older than 10 seconds
+        RATE_LIMIT_DATA[client_id] = [ts for ts in RATE_LIMIT_DATA[client_id] if now - ts < RATE_WINDOW]
+        
+        # Check if they exceeded the assigned 15 requests
+        if len(RATE_LIMIT_DATA[client_id]) >= RATE_LIMIT:
+            return JSONResponse(
+                status_code=429, 
+                content={"error": "Too Many Requests"}, 
+                headers={"Retry-After": str(RATE_WINDOW)}
+            )
+        RATE_LIMIT_DATA[client_id].append(now)
+
+    # --- Q6: PROMETHEUS COUNTER ---
     REQUEST_COUNT += 1
     
     start_time = time.time()
-    request_id = str(uuid.uuid4())
     
-    # Q6: Record the structured JSON log
+    # --- Q10 & Q1: REQUEST CONTEXT ID ---
+    # If the user sends an ID, reuse it. Otherwise, make a new one.
+    request_id = request.headers.get("X-Request-ID")
+    if not request_id:
+        request_id = str(uuid.uuid4())
+        
+    # Save the ID so endpoints (like /ping) can read it
+    request.state.req_id = request_id
+    
+    # --- Q6: STRUCTURED LOGS ---
     LOGS.append({
         "level": "INFO",
         "ts": time.time(),
         "path": request.url.path,
         "request_id": request_id
     })
-    
-    # Keep logs from growing infinitely and crashing the free server
     if len(LOGS) > 100:
         LOGS.pop(0)
 
-    # Process the request
+    # PROCESS THE ACTUAL REQUEST
     response = await call_next(request)
     
-    # Q1: Add the required headers
+    # --- Q10 & Q1: RESPONSE HEADERS ---
     process_time = time.time() - start_time
     response.headers["X-Request-ID"] = request_id
     response.headers["X-Process-Time"] = str(process_time)
     
     return response
+
+# ==========================================
+# QUESTION 10: PING ENDPOINT
+# ==========================================
+@app.get("/ping")
+def ping_endpoint(request: Request):
+    return {
+        "email": "23f2005302@ds.study.iitm.ac.in",
+        "request_id": request.state.req_id
+    }
 
 # ==========================================
 # QUESTION 1: THE STATS ENDPOINT
@@ -210,21 +249,17 @@ def analyze_events(
 # ==========================================
 @app.get("/work")
 def do_work(n: int = Query(default=1)):
-    # Simulates doing 'n' units of work
     return {"email": "23f2005302@ds.study.iitm.ac.in", "done": n}
 
 @app.get("/metrics", response_class=PlainTextResponse)
 def get_metrics():
-    # Returns the prometheus counter
     return f"http_requests_total {REQUEST_COUNT}\n"
 
 @app.get("/healthz")
 def get_health():
-    # Returns server uptime
     uptime = time.time() - APP_START_TIME
     return {"status": "ok", "uptime_s": uptime}
 
 @app.get("/logs/tail")
 def get_logs(limit: int = Query(default=10)):
-    # Returns the last N logs. LOGS[-limit:] slices the array from the end.
     return LOGS[-limit:]
