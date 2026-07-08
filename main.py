@@ -17,15 +17,14 @@ APP_START_TIME = time.time()
 REQUEST_COUNT = 0
 LOGS = []
 
-# Rate limiter bucket (15 requests per 10 seconds)
 RATE_LIMIT_DATA = defaultdict(list)
 RATE_LIMIT = 15
 RATE_WINDOW = 10
 
 # ==========================================
-# 🚨 THE MAGIC CORS FIX 🚨
-# allow_credentials=False lets the browser safely accept the wildcard headers.
-# expose_headers explicitly tells the browser to show X-Request-ID to the grader!
+# 🚨 THE GOLDEN CORS FIX 🚨
+# allow_credentials=True (Allows the grader's strict fetch to connect)
+# expose_headers (Explicitly names the headers so the browser doesn't block them)
 # ==========================================
 app.add_middleware(
     CORSMiddleware,
@@ -34,31 +33,29 @@ app.add_middleware(
         "https://exam.sanand.workers.dev",     # Your Browser
         "https://dash-qju8pt.example.com"      # Q1 Grader Origin
     ],
-    allow_credentials=False, 
+    allow_credentials=True, 
     allow_methods=["*"],
     allow_headers=["*"], 
     expose_headers=["X-Request-ID", "X-Process-Time", "Retry-After"] 
 )
 
 # ==========================================
-# MASTER MIDDLEWARE (Handles Q1, Q6, & Q10)
+# MASTER MIDDLEWARE
 # ==========================================
 @app.middleware("http")
 async def global_middleware(request: Request, call_next):
     global REQUEST_COUNT, LOGS, RATE_LIMIT_DATA
     
-    # 1. GENERATE OR REUSE REQUEST ID
+    # 1. REQUEST ID (Handles inbound or generates new)
     req_id = request.headers.get("X-Request-ID", str(uuid.uuid4()))
     request.state.req_id = req_id
 
-    # 2. PER-CLIENT RATE LIMITING
+    # 2. RATE LIMITING
     client_id = request.headers.get("X-Client-Id")
     if client_id:
         now = time.time()
-        # Clean out old requests
         RATE_LIMIT_DATA[client_id] = [ts for ts in RATE_LIMIT_DATA[client_id] if now - ts < RATE_WINDOW]
         
-        # Block if they hit 15 requests
         if len(RATE_LIMIT_DATA[client_id]) >= RATE_LIMIT:
             return JSONResponse(
                 status_code=429, 
@@ -70,7 +67,7 @@ async def global_middleware(request: Request, call_next):
             )
         RATE_LIMIT_DATA[client_id].append(now)
 
-    # 3. METRICS AND LOGGING
+    # 3. METRICS & LOGS
     REQUEST_COUNT += 1
     start_time = time.time()
     
@@ -83,13 +80,13 @@ async def global_middleware(request: Request, call_next):
     if len(LOGS) > 100: 
         LOGS.pop(0)
 
-    # 4. CRASH PROTECTOR (Ensures CORS headers are never lost)
+    # 4. PROCESS REQUEST
     try:
         response = await call_next(request)
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": "Server error", "detail": str(e)})
     
-    # 5. ATTACH HEADERS TO RESPONSE
+    # 5. ATTACH EXPLICIT HEADERS TO RESPONSE
     process_time = time.time() - start_time
     response.headers["X-Request-ID"] = req_id
     response.headers["X-Process-Time"] = str(process_time)
