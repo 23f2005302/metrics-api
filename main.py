@@ -1,9 +1,8 @@
-import base64
 from fastapi import FastAPI, Request
 from pydantic import BaseModel
-from google import genai
-from google.genai import types
+from google import genai  # This import works with the google-genai package
 import os
+import base64
 
 app = FastAPI()
 
