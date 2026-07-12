@@ -1,5 +1,4 @@
 fastapi
 uvicorn
-PyJWT[crypto]
 Pillow
-google-generativeai
+google-genai
