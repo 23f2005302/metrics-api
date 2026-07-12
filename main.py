@@ -2,7 +2,6 @@ import base64
 import os
 import json
 import asyncio
-import re
 from fastapi import FastAPI
 from pydantic import BaseModel
 from google import genai
@@ -25,8 +24,8 @@ async def analyze_audio(request: AudioRequest):
         "allowed_values": {}, "value_range": {}, "correlation": []
     }
 
-    # List of models to try in case of 429 errors
-    models_to_try = ["gemini-2.0-flash", "gemini-1.5-flash"]
+    # Updated to only use active, non-retired models
+    models_to_try = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-3.5-flash"]
     
     audio_bytes = base64.b64decode(request.audio_base64)
     
@@ -43,9 +42,7 @@ async def analyze_audio(request: AudioRequest):
         "Do not include any conversational text."
     )
 
-    # We will try up to 3 times total across models with a short delay if rate limited
     for attempt in range(3):
-        # Alternate models on retries to bypass specific model quotas
         model_name = models_to_try[attempt % len(models_to_try)]
         
         try:
@@ -66,7 +63,6 @@ async def analyze_audio(request: AudioRequest):
             raw_text = response.text.strip()
             result_json = json.loads(raw_text)
             
-            # Ensure the response has all the required keys
             for key in expected_structure.keys():
                 if key not in result_json:
                     result_json[key] = expected_structure[key]
@@ -76,14 +72,14 @@ async def analyze_audio(request: AudioRequest):
         except APIError as e:
             if e.code == 429:
                 print(f"Rate limit hit on {model_name}. Waiting 4 seconds before trying alternative...")
-                await asyncio.sleep(4)  # Give the API a brief moment to breathe
+                await asyncio.sleep(4) 
                 continue
             else:
                 print(f"API Error occurred: {e}")
-                break
+                # Don't break on a 404, just continue to the next model in the list
+                continue
         except Exception as e:
             print(f"Unexpected error: {e}")
             break
 
-    # Ultimate fallback if everything gets completely choked out by quota limits
     return expected_structure
