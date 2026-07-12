@@ -7,6 +7,11 @@ from collections import defaultdict
 import time
 import uuid
 import jwt
+import base64
+import io
+from PIL import Image
+import google.generativeai as genai
+import os
 
 app = FastAPI()
 
@@ -22,16 +27,21 @@ RATE_LIMIT = 15
 RATE_WINDOW = 10
 
 # ==========================================
+# GEMINI CONFIGURATION (Using Environment Variable)
+# ==========================================
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+if GEMINI_API_KEY:
+    genai.configure(api_key=GEMINI_API_KEY)
+
+# ==========================================
 # 🚨 THE GOLDEN CORS FIX 🚨
-# allow_credentials=True (Allows the grader's strict fetch to connect)
-# expose_headers (Explicitly names the headers so the browser doesn't block them)
 # ==========================================
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
-        "https://app-lkptr8.example.com",      # Q10 Assigned Origin
-        "https://exam.sanand.workers.dev",     # Your Browser
-        "https://dash-qju8pt.example.com"      # Q1 Grader Origin
+        "https://app-lkptr8.example.com",      
+        "https://exam.sanand.workers.dev",     
+        "https://dash-qju8pt.example.com"      
     ],
     allow_credentials=True, 
     allow_methods=["*"],
@@ -46,11 +56,9 @@ app.add_middleware(
 async def global_middleware(request: Request, call_next):
     global REQUEST_COUNT, LOGS, RATE_LIMIT_DATA
     
-    # 1. REQUEST ID (Handles inbound or generates new)
     req_id = request.headers.get("X-Request-ID", str(uuid.uuid4()))
     request.state.req_id = req_id
 
-    # 2. RATE LIMITING
     client_id = request.headers.get("X-Client-Id")
     if client_id:
         now = time.time()
@@ -67,7 +75,6 @@ async def global_middleware(request: Request, call_next):
             )
         RATE_LIMIT_DATA[client_id].append(now)
 
-    # 3. METRICS & LOGS
     REQUEST_COUNT += 1
     start_time = time.time()
     
@@ -80,13 +87,11 @@ async def global_middleware(request: Request, call_next):
     if len(LOGS) > 100: 
         LOGS.pop(0)
 
-    # 4. PROCESS REQUEST
     try:
         response = await call_next(request)
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": "Server error", "detail": str(e)})
     
-    # 5. ATTACH EXPLICIT HEADERS TO RESPONSE
     process_time = time.time() - start_time
     response.headers["X-Request-ID"] = req_id
     response.headers["X-Process-Time"] = str(process_time)
@@ -258,3 +263,40 @@ def get_health():
 @app.get("/logs/tail")
 def get_logs(limit: int = Query(default=10)):
     return LOGS[-limit:]
+
+# ==========================================
+# QUESTION 4: MULTIMODAL QA ENDPOINT
+# ==========================================
+class ImageQARequest(BaseModel):
+    image_base64: str
+    question: str
+
+@app.post("/answer-image")
+async def answer_image(request: ImageQARequest):
+    if not GEMINI_API_KEY:
+        return JSONResponse(status_code=500, content={"error": "API Key not configured on server"})
+        
+    try:
+        # Decode image
+        image_data = base64.b64decode(request.image_base64)
+        image = Image.open(io.BytesIO(image_data))
+
+        # Use Gemini model
+        model = genai.GenerativeModel('gemini-1.5-flash')
+        prompt = f"""
+        You are a data extraction assistant. Look at the provided image and answer the following question: 
+        "{request.question}"
+        
+        STRICT RULES:
+        - Return ONLY the exact answer. Do not include introductory text, explanations, or markdown formatting.
+        - The answer MUST be a string.
+        - For numeric answers, return only the number (e.g., '4089.35').
+        - DO NOT include units, commas, or currency symbols.
+        """
+
+        response = model.generate_content([prompt, image])
+        
+        return {"answer": response.text.strip()}
+
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)})
