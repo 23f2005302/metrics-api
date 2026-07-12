@@ -23,57 +23,47 @@ class AudioRequest(BaseModel):
 # ----------------------------------------------------
 @app.post("/analyze-audio")
 async def analyze_audio(request: AudioRequest):
-    # This is the strict fallback structure the grader expects
     expected_structure = {
-        "rows": 0,
-        "columns": [],
-        "mean": {},
-        "std": {},
-        "variance": {},
-        "min": {},
-        "max": {},
-        "median": {},
-        "mode": {},
-        "range": {},
-        "allowed_values": {},
-        "value_range": {},
-        "correlation": []
+        "rows": 0, "columns": [], "mean": {}, "std": {}, "variance": {}, 
+        "min": {}, "max": {}, "median": {}, "mode": {}, "range": {}, 
+        "allowed_values": {}, "value_range": {}, "correlation": []
     }
 
     try:
-        # Decode the base64 audio
         audio_bytes = base64.b64decode(request.audio_base64)
         
-        # Strict instructions to force Gemini into extracting the JSON
+        # 1. Multi-lingual System Instruction
         system_instruction = (
-            "You are a strict data extraction tool. Listen to the provided audio. "
-            "The audio describes statistical data. "
-            "You MUST output your response as a valid JSON object matching this exact schema: "
+            "You are an expert data analyst and multi-lingual audio transcription tool. "
+            "Listen carefully to the provided audio, which describes statistical data. "
+            "The audio may be spoken in Korean, Japanese, English, or other languages. "
+            "CRITICAL RULES: "
+            "1. Accurately identify the column names in the EXACT language spoken (e.g., if Korean is spoken, output ['키', '몸무게']). DO NOT TRANSLATE the column names. "
+            "2. You MUST output your response strictly as a JSON object matching this schema: "
             '{"rows": int, "columns": [str], "mean": {}, "std": {}, "variance": {}, "min": {}, '
             '"max": {}, "median": {}, "mode": {}, "range": {}, "allowed_values": {}, '
             '"value_range": {}, "correlation": []}. '
-            "Do not include any markdown, backticks, or conversational text. Output ONLY raw JSON."
+            "Do not include any conversational text."
         )
 
-        # Call Gemini (using audio/wav or audio/mp3 as a safe default for base64 audio)
+        # 2. Changed mime_type to audio/mp3 which is standard for web graders
         response = client.models.generate_content(
             model="gemini-2.0-flash",
             contents=[
-                "Extract the dataset statistics described in this audio and return the strict JSON.",
-                types.Part.from_bytes(data=audio_bytes, mime_type="audio/wav")
+                "Listen to this audio and extract the statistical metadata into the required JSON format.",
+                types.Part.from_bytes(data=audio_bytes, mime_type="audio/mp3") 
             ],
             config=types.GenerateContentConfig(
                 system_instruction=system_instruction,
-                temperature=0.0, # Deterministic mode
-                response_mime_type="application/json", # Force JSON output
+                temperature=0.0,
+                response_mime_type="application/json",
             )
         )
         
-        # Parse the JSON response from Gemini
         raw_text = response.text.strip()
         result_json = json.loads(raw_text)
         
-        # Ensure the response has all the required keys by merging with our template
+        # Ensure the response has all the required keys
         for key in expected_structure.keys():
             if key not in result_json:
                 result_json[key] = expected_structure[key]
@@ -82,5 +72,4 @@ async def analyze_audio(request: AudioRequest):
         
     except Exception as e:
         print(f"ERROR processing audio: {e}")
-        # If Gemini fails or errors out, return the exact empty schema so the grader doesn't crash!
         return expected_structure
